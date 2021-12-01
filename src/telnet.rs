@@ -109,6 +109,8 @@ impl Telnet {
                             continue;
                         }
                         self.content.append(&mut line);
+                    } else {
+                        break;
                     }
                 }
                 Err(e) => return Err(TelnetError::Timeout(e)),
