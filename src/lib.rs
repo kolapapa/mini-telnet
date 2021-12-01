@@ -1,5 +1,5 @@
-mod error;
-pub mod utils;
+mod codec;
+pub mod error;
 
 use futures::stream::StreamExt;
 use tokio::{
@@ -8,10 +8,9 @@ use tokio::{
     time::{self, Duration},
 };
 use tokio_util::codec::FramedRead;
-use utils::Item;
 
+use crate::codec::{Item, TelnetCodec};
 use crate::error::TelnetError;
-use crate::utils::TelnetCodec;
 
 pub struct Telnet {
     content: Vec<u8>,
