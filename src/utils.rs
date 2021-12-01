@@ -37,7 +37,6 @@ impl Decoder for TelnetCodec {
                 match res {
                     ParseIacResult::Invalid(err) => {
                         return Err(TelnetError::UnknownIAC(err));
-                        // return Err(io::Error::new(io::ErrorKind::InvalidData, err));
                     }
                     ParseIacResult::NeedMore => return Ok(None),
                     ParseIacResult::Item(item) => return Ok(Some(item)),
@@ -62,8 +61,6 @@ enum ParseIacResult {
     Item(Item),
 }
 
-/// Returns the parsed result of the first few bytes, as well as how many bytes
-/// to consume.
 fn try_parse_iac(bytes: &[u8]) -> (ParseIacResult, usize) {
     if bytes.len() < 2 {
         return (ParseIacResult::NeedMore, 0);
@@ -71,16 +68,13 @@ fn try_parse_iac(bytes: &[u8]) -> (ParseIacResult, usize) {
     if bytes[0] != 0xff {
         unreachable!();
     }
-    if is_three_byte_iac(bytes[1]) && bytes.len() < 3 {
+    if is_do_will_iac(bytes[1]) && bytes.len() < 3 {
         return (ParseIacResult::NeedMore, 0);
     }
 
     match bytes[1] {
-        // 250 => (ParseIacResult::Item(Item::SB), 2),
         251 => (ParseIacResult::Item(Item::Will(bytes[2])), 3),
-        // 252 => (ParseIacResult::Item(Item::Wont(bytes[2])), 3),
         253 => (ParseIacResult::Item(Item::Do(bytes[2])), 3),
-        // 254 => (ParseIacResult::Item(Item::Dont(bytes[2])), 3),
         cmd => (
             ParseIacResult::Invalid(format!("Unknown IAC command {}.", cmd)),
             0,
@@ -88,6 +82,6 @@ fn try_parse_iac(bytes: &[u8]) -> (ParseIacResult, usize) {
     }
 }
 
-fn is_three_byte_iac(byte: u8) -> bool {
+fn is_do_will_iac(byte: u8) -> bool {
     byte == 251 || byte == 253
 }
