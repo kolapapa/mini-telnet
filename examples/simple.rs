@@ -13,7 +13,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .login("ubuntu", "ubuntu", timeout)
         .await?;
 
-    let ps_output = telnet.execute("ps aux", timeout).await?;
-    println!("{}", ps_output);
+    println!("Telnet login Success.");
+
+    telnet.execute("echo 'test' > /tmp/temp", timeout).await?;
+    let output = telnet.execute("cat /tmp/temp", timeout).await?;
+    assert_eq!(output, "test\n");
     Ok(())
 }

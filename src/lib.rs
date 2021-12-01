@@ -1,6 +1,8 @@
 mod codec;
 pub mod error;
 
+use encoding::DecoderTrap;
+use encoding::{all::GBK, Encoding};
 use futures::stream::StreamExt;
 use tokio::{
     io::AsyncWriteExt,
@@ -59,7 +61,7 @@ impl Telnet {
                 Ok(res) => {
                     if let Some(res) = res {
                         match res? {
-                            Item::Do(i) => {
+                            Item::Do(i) | Item::Dont(i) => {
                                 // set window size
                                 if i == 0x1f {
                                     write
@@ -69,12 +71,10 @@ impl Telnet {
                                         ])
                                         .await?;
                                 } else {
-                                    // other: do => won't
                                     write.write(&[0xff, 0xfc, i]).await?;
                                 }
                             }
-                            Item::Will(i) => {
-                                // will => don't
+                            Item::Will(i) | Item::Wont(i) => {
                                 write.write(&[0xff, 0xfe, i]).await?;
                             }
                             Item::Line(content) => {
@@ -86,6 +86,7 @@ impl Telnet {
                                     return Ok(());
                                 }
                             }
+                            item => return Err(TelnetError::UnknownIAC(format!("{:?}", item))),
                         }
                     }
                 }
@@ -121,11 +122,16 @@ impl Telnet {
                 Err(e) => return Err(TelnetError::Timeout(e)),
             }
         }
-        let content = self.content.clone();
+        let output = String::from_utf8(self.content.clone());
+        let result = match output {
+            Ok(s) => Ok(s),
+            Err(e) => match GBK.decode(&self.content, DecoderTrap::Strict) {
+                Ok(gbk_out) => Ok(gbk_out),
+                Err(_) => Err(TelnetError::ParseError(e)),
+            },
+        };
         self.content.clear();
-
-        let output = String::from_utf8(content)?;
-        Ok(output)
+        result
     }
 
     pub fn set_prompt(&mut self, prompt: &str) -> &mut Self {
