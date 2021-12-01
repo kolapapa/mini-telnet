@@ -6,7 +6,7 @@ license = "MIT"
 repository = "https://github.com/kolapapa/mini-telnet"
 description = "Asynchronous minimal telnet library"
 keywords = ["tokio", "telnet"]
-categories = ["network-programming", "asynchronous", "telnet"]
+categories = ["network-programming", "asynchronous"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
