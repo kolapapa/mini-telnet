@@ -28,28 +28,17 @@ impl Decoder for TelnetCodec {
             }
 
             let byte = src.get_u8();
-            match byte {
-                10 => {
-                    self.current_line.push(byte);
-                    let line = self.current_line.to_vec();
-                    self.current_line.clear();
+            self.current_line.push(byte);
+            if byte == 10
+                || self
+                    .current_line
+                    .as_slice()
+                    .ends_with(self.prompt.as_bytes())
+            {
+                let line = self.current_line.to_vec();
+                self.current_line.clear();
 
-                    return Ok(Some(line));
-                }
-                0..=31 => {}
-                _ => {
-                    self.current_line.push(byte);
-                    if self
-                        .current_line
-                        .as_slice()
-                        .ends_with(self.prompt.as_bytes())
-                    {
-                        let line = self.current_line.to_vec();
-                        self.current_line.clear();
-
-                        return Ok(Some(line));
-                    }
-                }
+                return Ok(Some(line));
             }
         }
     }
