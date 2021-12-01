@@ -1,8 +1,6 @@
 mod error;
 pub mod utils;
 
-use std::io;
-
 use futures::stream::StreamExt;
 use tokio::{
     io::AsyncWriteExt,
@@ -10,6 +8,7 @@ use tokio::{
     time::{self, Duration},
 };
 use tokio_util::codec::FramedRead;
+use utils::Item;
 
 use crate::error::TelnetError;
 use crate::utils::TelnetCodec;
@@ -44,51 +43,56 @@ impl Telnet {
         })
     }
 
-    pub async fn login_timeout(
+    pub async fn login(
         &mut self,
         username: &str,
         password: &str,
         timeout: Duration,
     ) -> Result<(), TelnetError> {
-        match time::timeout(timeout, self.login(username, password)).await {
-            Ok(res) => res,
-            Err(e) => Err(TelnetError::Timeout(e)),
-        }
-    }
-
-    async fn login(&mut self, username: &str, password: &str) -> Result<(), TelnetError> {
         let user = Telnet::format_enter_str(username);
         let pass = Telnet::format_enter_str(password);
 
+        let (read, mut write) = self.stream.split();
+        let mut telnet = FramedRead::new(read, TelnetCodec::default());
+
         loop {
-            self.stream.readable().await?;
-            let mut buf = [0; 1024];
-            match self.stream.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let content = buf[0..n].to_vec();
-                    if content[0] == 0xff {
-                        // 设置窗口大小，不然展示会被截断（还有个字符颜色问题，应该也可以设）252 x 27
-                        self.stream
-                            .write(&[
-                                0xff, 0xfb, 0x1f, 0xff, 0xfa, 0x1f, 0x00, 0xfc, 0x00, 0x1b, 0xff,
-                                0xf0,
-                            ])
-                            .await?;
-                    }
-                    if content.ends_with(self.username_prompt.as_bytes()) {
-                        self.stream.write(user.as_bytes()).await?;
-                    } else if content.ends_with(self.password_prompt.as_bytes()) {
-                        self.stream.write(pass.as_bytes()).await?;
-                    } else if content.ends_with(self.prompt.as_bytes()) {
-                        return Ok(());
+            match time::timeout(timeout, telnet.next()).await {
+                Ok(res) => {
+                    if let Some(res) = res {
+                        match res? {
+                            Item::Do(i) => {
+                                // set window size
+                                if i == 0x1f {
+                                    write
+                                        .write(&[
+                                            0xff, 0xfb, 0x1f, 0xff, 0xfa, 0x1f, 0x00, 0xfc, 0x00,
+                                            0x1b, 0xff, 0xf0,
+                                        ])
+                                        .await?;
+                                } else {
+                                    // other: do => won't
+                                    write.write(&[0xff, 0xfc, i]).await?;
+                                }
+                            }
+                            Item::Will(i) => {
+                                // will => don't
+                                write.write(&[0xff, 0xfe, i]).await?;
+                            }
+                            Item::Line(content) => {
+                                if content.ends_with(self.username_prompt.as_bytes()) {
+                                    write.write(user.as_bytes()).await?;
+                                } else if content.ends_with(self.password_prompt.as_bytes()) {
+                                    write.write(pass.as_bytes()).await?;
+                                } else if content.ends_with(self.prompt.as_bytes()) {
+                                    return Ok(());
+                                }
+                            }
+                        }
                     }
                 }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(TelnetError::Timeout(e)),
             }
         }
-        Ok(())
     }
 
     pub async fn execute(&mut self, cmd: &str, timeout: Duration) -> Result<String, TelnetError> {
@@ -98,22 +102,21 @@ impl Telnet {
             Ok(res) => res?,
             Err(e) => return Err(TelnetError::Timeout(e)),
         };
-        let mut telnet = FramedRead::new(read, TelnetCodec::new(self.prompt.as_str()));
+        let mut telnet = FramedRead::new(read, TelnetCodec::default());
 
         loop {
             match time::timeout(timeout, telnet.next()).await {
                 Ok(res) => {
                     if let Some(item) = res {
-                        let mut line = item?;
-                        if line.ends_with(self.prompt.as_bytes()) {
-                            break;
+                        if let Item::Line(mut line) = item? {
+                            if line.ends_with(self.prompt.as_bytes()) {
+                                break;
+                            }
+                            if line.starts_with(cmd.as_bytes()) {
+                                continue;
+                            }
+                            self.content.append(&mut line);
                         }
-                        if line.starts_with(cmd.as_bytes()) {
-                            continue;
-                        }
-                        self.content.append(&mut line);
-                    } else {
-                        break;
                     }
                 }
                 Err(e) => return Err(TelnetError::Timeout(e)),

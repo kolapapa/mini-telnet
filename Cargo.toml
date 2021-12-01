@@ -18,3 +18,8 @@ thiserror = "1.0.30"
 tokio = { version = "1.14.0", features = ["time", "net", "io-util"] }
 tokio-util = { version = "0.6.9", features = ["codec"] }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["full"]}
+
+[[example]]
+name = "simple"

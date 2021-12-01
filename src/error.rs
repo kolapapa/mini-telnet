@@ -11,4 +11,6 @@ pub enum TelnetError {
     IOError(#[from] io::Error),
     #[error("Parse string error.")]
     ParseError(#[from] string::FromUtf8Error),
+    #[error("Unknown IAC command `{0}`.")]
+    UnknownIAC(String),
 }
