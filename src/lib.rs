@@ -14,7 +14,56 @@ use tokio_util::codec::FramedRead;
 use crate::codec::{Item, TelnetCodec};
 use crate::error::TelnetError;
 
+#[derive(Debug, Default)]
+pub struct TelnetBuilder {
+    prompt: String,
+    username_prompt: String,
+    password_prompt: String,
+    connect_timeout: Duration,
+    timeout: Duration,
+}
+
+impl TelnetBuilder {
+    pub fn prompt(mut self, prompt: &str) -> TelnetBuilder {
+        self.prompt = prompt.to_string();
+        self
+    }
+
+    pub fn login_prompt(mut self, user_prompt: &str, pass_prompt: &str) -> TelnetBuilder {
+        self.username_prompt = user_prompt.to_string();
+        self.password_prompt = pass_prompt.to_string();
+        self
+    }
+
+    /// Set the timeout for `TcpStream` connect remote addr.
+    pub fn connect_timeout(mut self, connect_timeout: Duration) -> TelnetBuilder {
+        self.connect_timeout = connect_timeout;
+        self
+    }
+
+    /// Set the timeout for the operation.
+    pub fn timeout(mut self, timeout: Duration) -> TelnetBuilder {
+        self.timeout = timeout;
+        self
+    }
+
+    pub async fn connect(self, addr: &str) -> Result<Telnet, TelnetError> {
+        match time::timeout(self.connect_timeout, TcpStream::connect(addr)).await {
+            Ok(res) => Ok(Telnet {
+                content: vec![],
+                stream: res?,
+                timeout: self.timeout,
+                prompt: self.prompt,
+                username_prompt: self.username_prompt,
+                password_prompt: self.password_prompt,
+            }),
+            Err(e) => Err(TelnetError::Timeout(e)),
+        }
+    }
+}
+
 pub struct Telnet {
+    timeout: Duration,
     content: Vec<u8>,
     stream: TcpStream,
     prompt: String,
@@ -23,6 +72,9 @@ pub struct Telnet {
 }
 
 impl Telnet {
+    pub fn builder() -> TelnetBuilder {
+        TelnetBuilder::default()
+    }
     // Format the end of the string as a `\n`
     fn format_enter_str(s: &str) -> String {
         if !s.ends_with('\n') {
@@ -32,24 +84,7 @@ impl Telnet {
         }
     }
 
-    // Connect, default prompt is openwrt's prompt.
-    pub async fn connect(addr: &str, timeout: Duration) -> Result<Self, TelnetError> {
-        let res = time::timeout(timeout, TcpStream::connect(addr)).await?;
-        Ok(Telnet {
-            content: vec![],
-            stream: res?,
-            prompt: String::from("~# "),
-            username_prompt: String::from("login: "),
-            password_prompt: String::from("Password: "),
-        })
-    }
-
-    pub async fn login(
-        &mut self,
-        username: &str,
-        password: &str,
-        timeout: Duration,
-    ) -> Result<(), TelnetError> {
+    pub async fn login(&mut self, username: &str, password: &str) -> Result<(), TelnetError> {
         let user = Telnet::format_enter_str(username);
         let pass = Telnet::format_enter_str(password);
 
@@ -57,7 +92,7 @@ impl Telnet {
         let mut telnet = FramedRead::new(read, TelnetCodec::default());
 
         loop {
-            match time::timeout(timeout, telnet.next()).await {
+            match time::timeout(self.timeout, telnet.next()).await {
                 Ok(res) => {
                     if let Some(res) = res {
                         match res? {
@@ -95,17 +130,17 @@ impl Telnet {
         }
     }
 
-    pub async fn execute(&mut self, cmd: &str, timeout: Duration) -> Result<String, TelnetError> {
+    pub async fn execute(&mut self, cmd: &str) -> Result<String, TelnetError> {
         let command = Telnet::format_enter_str(cmd);
         let (read, mut write) = self.stream.split();
-        match time::timeout(timeout, write.write(command.as_bytes())).await {
+        match time::timeout(self.timeout, write.write(command.as_bytes())).await {
             Ok(res) => res?,
             Err(e) => return Err(TelnetError::Timeout(e)),
         };
         let mut telnet = FramedRead::new(read, TelnetCodec::default());
 
         loop {
-            match time::timeout(timeout, telnet.next()).await {
+            match time::timeout(self.timeout, telnet.next()).await {
                 Ok(res) => {
                     if let Some(item) = res {
                         if let Item::Line(mut line) = item? {
@@ -132,20 +167,5 @@ impl Telnet {
         };
         self.content.clear();
         result
-    }
-
-    pub fn set_prompt(&mut self, prompt: &str) -> &mut Self {
-        self.prompt = prompt.to_string();
-        self
-    }
-
-    pub fn set_username_prompt(&mut self, prompt: &str) -> &mut Self {
-        self.username_prompt = prompt.to_string();
-        self
-    }
-
-    pub fn set_password_prompt(&mut self, prompt: &str) -> &mut Self {
-        self.password_prompt = prompt.to_string();
-        self
     }
 }
