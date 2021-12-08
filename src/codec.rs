@@ -45,9 +45,10 @@ impl Decoder for TelnetCodec {
                     ParseIacResult::Invalid(err) => {
                         return Err(TelnetError::UnknownIAC(err));
                     }
-                    ParseIacResult::NeedMore => return Ok(Some(Item::NeedMore)),
                     ParseIacResult::Item(item) => {
-                        if matches!(item, Item::SB(_)) {
+                        if matches!(item, Item::NeedMore) {
+                            return Ok(Some(Item::NeedMore));
+                        } else if matches!(item, Item::SB(_)) {
                             self.sb_flag = true;
                             continue;
                         } else if matches!(item, Item::SE(_)) {
@@ -87,23 +88,22 @@ impl Decoder for TelnetCodec {
 
 enum ParseIacResult {
     Invalid(String),
-    NeedMore,
     Item(Item),
 }
 
 fn try_parse_iac(bytes: &[u8]) -> (ParseIacResult, usize) {
     if bytes.len() < 2 {
-        return (ParseIacResult::NeedMore, 0);
+        return (ParseIacResult::Item(Item::NeedMore), 0);
     }
     if bytes[0] != 0xff {
         unreachable!();
     }
     if is_three_byte_iac(bytes[1]) && bytes.len() < 3 {
-        return (ParseIacResult::NeedMore, 0);
+        return (ParseIacResult::Item(Item::NeedMore), 0);
     }
 
     if is_sub(bytes[1]) && bytes.len() < 3 {
-        return (ParseIacResult::NeedMore, 0);
+        return (ParseIacResult::Item(Item::NeedMore), 0);
     }
 
     match bytes[1] {
