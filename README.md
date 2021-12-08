@@ -1,5 +1,9 @@
 # mini-telnet
 
+[![Crates.io](https://img.shields.io/crates/v/mini-telnet.svg)](https://crates.io/crates/mini-telnet)
+[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/kolapapa/mini-telnet/blob/main/LICENSE)
+[![API docs](https://docs.rs/mini-telnet/badge.svg)](http://docs.rs/mini-telnet)
+
 A mini async telnet client.
 
 ## Usage
@@ -35,6 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(output, "test\n");
     Ok(())
 }
+
+```
+
+```sh
 
 ```
 

@@ -26,6 +26,7 @@ pub enum Item {
     Wont(u8),
     Do(u8),
     Dont(u8),
+    NeedMore,
 }
 
 impl Decoder for TelnetCodec {
@@ -44,7 +45,7 @@ impl Decoder for TelnetCodec {
                     ParseIacResult::Invalid(err) => {
                         return Err(TelnetError::UnknownIAC(err));
                     }
-                    ParseIacResult::NeedMore => return Ok(None),
+                    ParseIacResult::NeedMore => return Ok(Some(Item::NeedMore)),
                     ParseIacResult::Item(item) => {
                         if matches!(item, Item::SB(_)) {
                             self.sb_flag = true;

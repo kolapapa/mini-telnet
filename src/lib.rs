@@ -24,11 +24,13 @@ pub struct TelnetBuilder {
 }
 
 impl TelnetBuilder {
+    /// Set the telnet server prompt, as many characters as possible.(`~` or `#` is not good. May misjudge).
     pub fn prompt(mut self, prompt: &str) -> TelnetBuilder {
         self.prompt = prompt.to_string();
         self
     }
 
+    /// Login prompt, the common ones are `login: ` and `Password: ` or `Username:` and `Password:`.
     pub fn login_prompt(mut self, user_prompt: &str, pass_prompt: &str) -> TelnetBuilder {
         self.username_prompt = user_prompt.to_string();
         self.password_prompt = pass_prompt.to_string();
@@ -47,6 +49,7 @@ impl TelnetBuilder {
         self
     }
 
+    /// Establish a connection with the remote telnetd.
     pub async fn connect(self, addr: &str) -> Result<Telnet, TelnetError> {
         match time::timeout(self.connect_timeout, TcpStream::connect(addr)).await {
             Ok(res) => Ok(Telnet {
@@ -72,6 +75,7 @@ pub struct Telnet {
 }
 
 impl Telnet {
+    /// Create a `TelnetBuilder`
     pub fn builder() -> TelnetBuilder {
         TelnetBuilder::default()
     }
@@ -84,9 +88,28 @@ impl Telnet {
         }
     }
 
+    /// Login remote telnet daemon, only retry one time.
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let mut client = Telnet::builder()
+    ///     .prompt("username@hostname:$ ")
+    ///     .login_prompt("login: ", "Password: ")
+    ///     .connect_timeout(Duration::from_secs(3))
+    ///     .connect("192.168.0.1").await?;
+    ///
+    /// match client.login("username", "password").await {
+    ///     Ok(_) => println!("login success."),
+    ///     Err(e) => println!("login failed: {}", e),
+    /// };
+    /// ```
+    ///
     pub async fn login(&mut self, username: &str, password: &str) -> Result<(), TelnetError> {
         let user = Telnet::format_enter_str(username);
         let pass = Telnet::format_enter_str(password);
+
+        // Only retry one time, if password is input, then set with `true`;
+        let mut auth_failed = false;
 
         let (read, mut write) = self.stream.split();
         let mut telnet = FramedRead::new(read, TelnetCodec::default());
@@ -94,44 +117,68 @@ impl Telnet {
         loop {
             match time::timeout(self.timeout, telnet.next()).await {
                 Ok(res) => {
-                    if let Some(res) = res {
-                        match res? {
-                            Item::Do(i) | Item::Dont(i) => {
-                                // set window size
-                                if i == 0x1f {
-                                    write
-                                        .write(&[
-                                            0xff, 0xfb, 0x1f, 0xff, 0xfa, 0x1f, 0x00, 0xfc, 0x00,
-                                            0x1b, 0xff, 0xf0,
-                                        ])
-                                        .await?;
-                                } else {
-                                    write.write(&[0xff, 0xfc, i]).await?;
+                    match res {
+                        Some(res) => {
+                            match res? {
+                                Item::Do(i) | Item::Dont(i) => {
+                                    // set window size
+                                    if i == 0x1f {
+                                        write
+                                            .write(&[
+                                                0xff, 0xfb, 0x1f, 0xff, 0xfa, 0x1f, 0x00, 0xfc,
+                                                0x00, 0x1b, 0xff, 0xf0,
+                                            ])
+                                            .await?;
+                                    } else {
+                                        write.write(&[0xff, 0xfc, i]).await?;
+                                    }
                                 }
-                            }
-                            Item::Will(i) | Item::Wont(i) => {
-                                write.write(&[0xff, 0xfe, i]).await?;
-                            }
-                            Item::Line(content) => {
-                                if content.ends_with(self.username_prompt.as_bytes()) {
-                                    write.write(user.as_bytes()).await?;
-                                } else if content.ends_with(self.password_prompt.as_bytes()) {
-                                    write.write(pass.as_bytes()).await?;
-                                } else if content.ends_with(self.prompt.as_bytes()) {
-                                    return Ok(());
+                                Item::Will(i) | Item::Wont(i) => {
+                                    write.write(&[0xff, 0xfe, i]).await?;
                                 }
+                                Item::Line(content) => {
+                                    if content.ends_with(self.username_prompt.as_bytes()) {
+                                        if auth_failed {
+                                            return Err(TelnetError::AuthenticationFailed);
+                                        }
+                                        write.write(user.as_bytes()).await?;
+                                    } else if content.ends_with(self.password_prompt.as_bytes()) {
+                                        write.write(pass.as_bytes()).await?;
+                                        auth_failed = true;
+                                    } else if content.ends_with(self.prompt.as_bytes()) {
+                                        return Ok(());
+                                    }
+                                }
+                                item => return Err(TelnetError::UnknownIAC(format!("{:?}", item))),
                             }
-                            item => return Err(TelnetError::UnknownIAC(format!("{:?}", item))),
                         }
-                    }
+                        None => return Err(TelnetError::NoMoreData),
+                    };
                 }
                 Err(e) => return Err(TelnetError::Timeout(e)),
             }
         }
     }
 
+    /// Execute command, and filter it input message by line count.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let output: String = client.execute_multi_line(r#"cat <<< EOF
+    /// fist line
+    /// second line
+    /// third line
+    /// end
+    /// EOF"#).await?;
+    /// assert_eq!(ouptut, "first line\nsecond line\nthird line\nend\n");
+    /// ```
+    ///
     pub async fn execute(&mut self, cmd: &str) -> Result<String, TelnetError> {
         let command = Telnet::format_enter_str(cmd);
+        let mut line_feed_cnt = command.lines().count() as isize;
+        let mut real_output = false;
+
         let (read, mut write) = self.stream.split();
         match time::timeout(self.timeout, write.write(command.as_bytes())).await {
             Ok(res) => res?,
@@ -141,19 +188,26 @@ impl Telnet {
 
         loop {
             match time::timeout(self.timeout, telnet.next()).await {
-                Ok(res) => {
-                    if let Some(item) = res {
+                Ok(res) => match res {
+                    Some(item) => {
                         if let Item::Line(mut line) = item? {
                             if line.ends_with(self.prompt.as_bytes()) {
                                 break;
                             }
-                            if line.starts_with(cmd.as_bytes()) {
-                                continue;
+                            if line.ends_with(&[10]) && line_feed_cnt > 0 {
+                                line_feed_cnt -= 1;
+                                if line_feed_cnt == 0 {
+                                    real_output = true;
+                                    continue;
+                                }
                             }
-                            self.content.append(&mut line);
+                            if real_output {
+                                self.content.append(&mut line);
+                            }
                         }
                     }
-                }
+                    None => return Err(TelnetError::NoMoreData),
+                },
                 Err(e) => return Err(TelnetError::Timeout(e)),
             }
         }
