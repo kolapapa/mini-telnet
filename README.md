@@ -11,7 +11,7 @@ A mini async telnet client.
 Add to Cargo.toml:
 
 ```toml
-mini-telnet = "0.1.3"
+mini-telnet = "0.1.4"
 ```
 
 ## Example
@@ -40,10 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(telnet.execute("echo 'haha'").await?, "haha\n");
     Ok(())
 }
-```
-
-```sh
-
 ```
 
 Part of the logic referenced from: [telnet-chat](https://github.com/Darksonn/telnet-chat)
