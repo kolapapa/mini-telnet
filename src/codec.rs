@@ -86,8 +86,8 @@ impl Decoder for TelnetCodec {
 
 enum ParseIacResult {
     Invalid(String),
-    NeedMore,
     Item(Item),
+    NeedMore,
 }
 
 fn try_parse_iac(bytes: &[u8]) -> (ParseIacResult, usize) {
