@@ -60,7 +60,10 @@ impl TelnetBuilder {
                 username_prompt: self.username_prompt,
                 password_prompt: self.password_prompt,
             }),
-            Err(e) => Err(TelnetError::Timeout(e)),
+            Err(_) => Err(TelnetError::Timeout(format!(
+                "Connect remote addr({})",
+                addr
+            ))),
         }
     }
 }
@@ -155,7 +158,7 @@ impl Telnet {
                         None => return Err(TelnetError::NoMoreData),
                     };
                 }
-                Err(e) => return Err(TelnetError::Timeout(e)),
+                Err(_) => return Err(TelnetError::Timeout("login".to_string())),
             }
         }
     }
@@ -165,13 +168,7 @@ impl Telnet {
     /// # Examples
     ///
     /// ```no_run
-    /// let output: String = client.execute_multi_line(r#"cat <<< EOF
-    /// fist line
-    /// second line
-    /// third line
-    /// end
-    /// EOF"#).await?;
-    /// assert_eq!(ouptut, "first line\nsecond line\nthird line\nend\n");
+    ///assert_eq!(telnet.execute("echo 'haha'").await?, "haha\n");
     /// ```
     ///
     pub async fn execute(&mut self, cmd: &str) -> Result<String, TelnetError> {
@@ -182,7 +179,7 @@ impl Telnet {
         let (read, mut write) = self.stream.split();
         match time::timeout(self.timeout, write.write(command.as_bytes())).await {
             Ok(res) => res?,
-            Err(e) => return Err(TelnetError::Timeout(e)),
+            Err(_) => return Err(TelnetError::Timeout("write cmd".to_string())),
         };
         let mut telnet = FramedRead::new(read, TelnetCodec::default());
 
@@ -208,7 +205,57 @@ impl Telnet {
                     }
                     None => return Err(TelnetError::NoMoreData),
                 },
-                Err(e) => return Err(TelnetError::Timeout(e)),
+                Err(_) => return Err(TelnetError::Timeout("read next framed".to_string())),
+            }
+        }
+        let output = String::from_utf8(self.content.clone());
+        let result = match output {
+            Ok(s) => Ok(s),
+            Err(e) => match GBK.decode(&self.content, DecoderTrap::Strict) {
+                Ok(gbk_out) => Ok(gbk_out),
+                Err(_) => Err(TelnetError::ParseError(e)),
+            },
+        };
+        self.content.clear();
+        result
+    }
+
+    /// All echoed content is returned when the command is executed.(**Note** that this may contain some
+    /// useless information, such as prompts, which need to be filtered and processed by yourself.)
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// assert_eq!(
+    ///     "echo 'haha'\nhaha\n",
+    ///     telnet.normal_execute("echo 'haha'").await?
+    /// );
+    ///```
+    ///
+    pub async fn normal_execute(&mut self, cmd: &str) -> Result<String, TelnetError> {
+        let command = Telnet::format_enter_str(cmd);
+
+        let (read, mut write) = self.stream.split();
+        match time::timeout(self.timeout, write.write(command.as_bytes())).await {
+            Ok(res) => res?,
+            Err(_) => return Err(TelnetError::Timeout("write cmd".to_string())),
+        };
+        let mut telnet = FramedRead::new(read, TelnetCodec::default());
+
+        loop {
+            match time::timeout(self.timeout, telnet.next()).await {
+                Ok(res) => match res {
+                    Some(item) => {
+                        if let Item::Line(mut line) = item? {
+                            if line.ends_with(self.prompt.as_bytes()) {
+                                break;
+                            }
+                            self.content.append(&mut line);
+                        }
+                    }
+                    None => return Err(TelnetError::NoMoreData),
+                },
+                Err(_) => return Err(TelnetError::Timeout("read next framed".to_string())),
             }
         }
         let output = String::from_utf8(self.content.clone());

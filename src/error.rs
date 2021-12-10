@@ -1,12 +1,11 @@
 use std::{io, string};
 
 use thiserror::Error;
-use tokio::time::error::Elapsed;
 
 #[derive(Error, Debug)]
 pub enum TelnetError {
-    #[error("Operation timeout.")]
-    Timeout(#[from] Elapsed),
+    #[error("`{0}` Operation timeout.")]
+    Timeout(String),
     #[error("io error.")]
     IOError(#[from] io::Error),
     #[error("Parse string error.")]
