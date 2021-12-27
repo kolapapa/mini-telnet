@@ -11,7 +11,7 @@ A mini async telnet client.
 Add to Cargo.toml:
 
 ```toml
-mini-telnet = "0.1.4"
+mini-telnet = "0.1.5"
 ```
 
 ## Example

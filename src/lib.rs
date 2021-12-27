@@ -173,6 +173,7 @@ impl Telnet {
     ///
     pub async fn execute(&mut self, cmd: &str) -> Result<String, TelnetError> {
         let command = Telnet::format_enter_str(cmd);
+        let mut incomplete_line: Vec<u8> = vec![];
         let mut line_feed_cnt = command.lines().count() as isize;
         let mut real_output = false;
 
@@ -188,9 +189,11 @@ impl Telnet {
                 Ok(res) => match res {
                     Some(item) => {
                         if let Item::Line(mut line) = item? {
+                            // ignore prompt line
                             if line.ends_with(self.prompt.as_bytes()) {
                                 break;
                             }
+                            // ignore command line echo
                             if line.ends_with(&[10]) && line_feed_cnt > 0 {
                                 line_feed_cnt -= 1;
                                 if line_feed_cnt == 0 {
@@ -198,8 +201,23 @@ impl Telnet {
                                     continue;
                                 }
                             }
-                            if real_output {
+
+                            if !real_output {
+                                continue;
+                            }
+
+                            if !line.ends_with(&[10]) || !incomplete_line.is_empty() {
+                                incomplete_line.append(&mut line);
+                            } else {
                                 self.content.append(&mut line);
+                                continue;
+                            }
+                            // ignore command line
+                            if incomplete_line.ends_with(self.prompt.as_bytes()) {
+                                break;
+                            }
+                            if incomplete_line.ends_with(&[10]) {
+                                self.content.append(&mut incomplete_line)
                             }
                         }
                     }
@@ -234,6 +252,7 @@ impl Telnet {
     ///
     pub async fn normal_execute(&mut self, cmd: &str) -> Result<String, TelnetError> {
         let command = Telnet::format_enter_str(cmd);
+        let mut incomplete_line: Vec<u8> = vec![];
 
         let (read, mut write) = self.stream.split();
         match time::timeout(self.timeout, write.write(command.as_bytes())).await {
@@ -250,7 +269,20 @@ impl Telnet {
                             if line.ends_with(self.prompt.as_bytes()) {
                                 break;
                             }
-                            self.content.append(&mut line);
+
+                            if !line.ends_with(&[10]) || !incomplete_line.is_empty() {
+                                incomplete_line.append(&mut line);
+                            } else {
+                                self.content.append(&mut line);
+                                continue;
+                            }
+                            // ignore command line
+                            if incomplete_line.ends_with(self.prompt.as_bytes()) {
+                                break;
+                            }
+                            if incomplete_line.ends_with(&[10]) {
+                                self.content.append(&mut incomplete_line)
+                            }
                         }
                     }
                     None => return Err(TelnetError::NoMoreData),
