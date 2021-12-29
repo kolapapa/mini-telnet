@@ -2,7 +2,7 @@ mod codec;
 pub mod error;
 
 use encoding::DecoderTrap;
-use encoding::{all::GBK, Encoding};
+use encoding::{all::GB18030, all::GBK, Encoding};
 use futures::stream::StreamExt;
 use tokio::{
     io::AsyncWriteExt,
@@ -70,7 +70,7 @@ impl TelnetBuilder {
 
 pub struct Telnet {
     timeout: Duration,
-    content: Vec<u8>,
+    content: Vec<String>,
     stream: TcpStream,
     prompt: String,
     username_prompt: String,
@@ -209,7 +209,7 @@ impl Telnet {
                             if !line.ends_with(&[10]) || !incomplete_line.is_empty() {
                                 incomplete_line.append(&mut line);
                             } else {
-                                self.content.append(&mut line);
+                                self.content.push(decode(&line)?);
                                 continue;
                             }
                             // ignore command line
@@ -217,7 +217,8 @@ impl Telnet {
                                 break;
                             }
                             if incomplete_line.ends_with(&[10]) {
-                                self.content.append(&mut incomplete_line)
+                                self.content.push(decode(&incomplete_line)?);
+                                incomplete_line.clear();
                             }
                         }
                     }
@@ -226,16 +227,9 @@ impl Telnet {
                 Err(_) => return Err(TelnetError::Timeout("read next framed".to_string())),
             }
         }
-        let output = String::from_utf8(self.content.clone());
-        let result = match output {
-            Ok(s) => Ok(s),
-            Err(e) => match GBK.decode(&self.content, DecoderTrap::Strict) {
-                Ok(gbk_out) => Ok(gbk_out),
-                Err(_) => Err(TelnetError::ParseError(e)),
-            },
-        };
+        let result = self.content.join("\n");
         self.content.clear();
-        result
+        Ok(result)
     }
 
     /// All echoed content is returned when the command is executed.(**Note** that this may contain some
@@ -273,7 +267,7 @@ impl Telnet {
                             if !line.ends_with(&[10]) || !incomplete_line.is_empty() {
                                 incomplete_line.append(&mut line);
                             } else {
-                                self.content.append(&mut line);
+                                self.content.push(decode(&line)?);
                                 continue;
                             }
                             // ignore command line
@@ -281,7 +275,8 @@ impl Telnet {
                                 break;
                             }
                             if incomplete_line.ends_with(&[10]) {
-                                self.content.append(&mut incomplete_line)
+                                self.content.push(decode(&incomplete_line)?);
+                                incomplete_line.clear();
                             }
                         }
                     }
@@ -290,15 +285,24 @@ impl Telnet {
                 Err(_) => return Err(TelnetError::Timeout("read next framed".to_string())),
             }
         }
-        let output = String::from_utf8(self.content.clone());
-        let result = match output {
-            Ok(s) => Ok(s),
-            Err(e) => match GBK.decode(&self.content, DecoderTrap::Strict) {
-                Ok(gbk_out) => Ok(gbk_out),
-                Err(_) => Err(TelnetError::ParseError(e)),
-            },
-        };
+        let result = self.content.join("\n");
         self.content.clear();
-        result
+        Ok(result)
+    }
+}
+
+fn decode(line: &[u8]) -> Result<String, TelnetError> {
+    match String::from_utf8(line.to_vec()) {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            if let Ok(result) = GBK.decode(line, DecoderTrap::Strict) {
+                return Ok(result);
+            }
+
+            if let Ok(result) = GB18030.decode(line, DecoderTrap::Strict) {
+                return Ok(result);
+            }
+            Err(TelnetError::ParseError(e))
+        }
     }
 }
