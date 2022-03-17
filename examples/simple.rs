@@ -5,7 +5,7 @@ use mini_telnet::Telnet;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut telnet = Telnet::builder()
-        .prompt("ubuntu@ubuntu:~$ ")
+        .prompts(vec!["ubuntu@ubuntu:~$ ".to_string()])
         .login_prompt("login: ", "Password: ")
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(5))
