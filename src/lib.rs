@@ -25,8 +25,8 @@ pub struct TelnetBuilder {
 
 impl TelnetBuilder {
     /// Set the telnet server prompt, as many characters as possible.(`~` or `#` is not good. May misjudge).
-    pub fn prompts(mut self, prompts: Vec<String>) -> TelnetBuilder {
-        self.prompts = prompts;
+    pub fn prompts<T: ToString>(mut self, prompts: &[T]) -> TelnetBuilder {
+        self.prompts = prompts.iter().map(|p| p.to_string()).collect();
         self
     }
 
@@ -99,7 +99,7 @@ impl Telnet {
     ///     .prompt("username@hostname:$ ")
     ///     .login_prompt("login: ", "Password: ")
     ///     .connect_timeout(Duration::from_secs(3))
-    ///     .connect("192.168.0.1").await?;
+    ///     .connect("192.168.0.1:23").await?;
     ///
     /// match client.login("username", "password").await {
     ///     Ok(_) => println!("login success."),
