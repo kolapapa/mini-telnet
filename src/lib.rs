@@ -16,7 +16,7 @@ use crate::error::TelnetError;
 
 #[derive(Debug, Default)]
 pub struct TelnetBuilder {
-    prompt: String,
+    prompts: Vec<String>,
     username_prompt: String,
     password_prompt: String,
     connect_timeout: Duration,
@@ -25,8 +25,8 @@ pub struct TelnetBuilder {
 
 impl TelnetBuilder {
     /// Set the telnet server prompt, as many characters as possible.(`~` or `#` is not good. May misjudge).
-    pub fn prompt(mut self, prompt: &str) -> TelnetBuilder {
-        self.prompt = prompt.to_string();
+    pub fn prompts<T: ToString>(mut self, prompts: &[T]) -> TelnetBuilder {
+        self.prompts = prompts.iter().map(|p| p.to_string()).collect();
         self
     }
 
@@ -56,7 +56,7 @@ impl TelnetBuilder {
                 content: vec![],
                 stream: res?,
                 timeout: self.timeout,
-                prompt: self.prompt,
+                prompts: self.prompts,
                 username_prompt: self.username_prompt,
                 password_prompt: self.password_prompt,
             }),
@@ -72,7 +72,7 @@ pub struct Telnet {
     timeout: Duration,
     content: Vec<String>,
     stream: TcpStream,
-    prompt: String,
+    prompts: Vec<String>,
     username_prompt: String,
     password_prompt: String,
 }
@@ -99,7 +99,7 @@ impl Telnet {
     ///     .prompt("username@hostname:$ ")
     ///     .login_prompt("login: ", "Password: ")
     ///     .connect_timeout(Duration::from_secs(3))
-    ///     .connect("192.168.0.1").await?;
+    ///     .connect("192.168.0.1:23").await?;
     ///
     /// match client.login("username", "password").await {
     ///     Ok(_) => println!("login success."),
@@ -148,7 +148,9 @@ impl Telnet {
                                     } else if content.ends_with(self.password_prompt.as_bytes()) {
                                         write.write(pass.as_bytes()).await?;
                                         auth_failed = true;
-                                    } else if content.ends_with(self.prompt.as_bytes()) {
+                                    } else if !self.prompts.iter()
+                                                .filter(|p| content.ends_with(p.as_bytes()))
+                                                .collect::<Vec<_>>().is_empty() {
                                         return Ok(());
                                     }
                                 }
@@ -190,7 +192,9 @@ impl Telnet {
                     Some(item) => {
                         if let Item::Line(mut line) = item? {
                             // ignore prompt line
-                            if line.ends_with(self.prompt.as_bytes()) {
+                            if !self.prompts.iter()
+                                    .filter(|p| line.ends_with(p.as_bytes()))
+                                    .collect::<Vec<_>>().is_empty() {
                                 break;
                             }
                             // ignore command line echo
@@ -213,7 +217,9 @@ impl Telnet {
                                 continue;
                             }
                             // ignore command line
-                            if incomplete_line.ends_with(self.prompt.as_bytes()) {
+                            if !self.prompts.iter()
+                                    .filter(|p| incomplete_line.ends_with(p.as_bytes()))
+                                    .collect::<Vec<_>>().is_empty() {
                                 break;
                             }
                             if incomplete_line.ends_with(&[10]) {
@@ -260,7 +266,9 @@ impl Telnet {
                 Ok(res) => match res {
                     Some(item) => {
                         if let Item::Line(mut line) = item? {
-                            if line.ends_with(self.prompt.as_bytes()) {
+                            if !self.prompts.iter()
+                                    .filter(|p| line.ends_with(p.as_bytes()))
+                                    .collect::<Vec<_>>().is_empty() {
                                 break;
                             }
 
@@ -271,7 +279,9 @@ impl Telnet {
                                 continue;
                             }
                             // ignore command line
-                            if incomplete_line.ends_with(self.prompt.as_bytes()) {
+                            if !self.prompts.iter()
+                                    .filter(|p| incomplete_line.ends_with(p.as_bytes()))
+                                    .collect::<Vec<_>>().is_empty() {
                                 break;
                             }
                             if incomplete_line.ends_with(&[10]) {
