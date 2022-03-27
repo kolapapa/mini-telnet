@@ -25,6 +25,13 @@ pub struct TelnetBuilder {
 
 impl TelnetBuilder {
     /// Set the telnet server prompt, as many characters as possible.(`~` or `#` is not good. May misjudge).
+    pub fn prompt<T: ToString>(mut self, prompt: T) -> TelnetBuilder {
+        self.prompts = vec![prompt.to_string()];
+        self
+    }
+
+    /// Set the telnet server prompts, as many characters as possible.(`~` or `#` is not good. May misjudge).
+    /// If `prompts` is set, `prompt` will be overwritten.
     pub fn prompts<T: ToString>(mut self, prompts: &[T]) -> TelnetBuilder {
         self.prompts = prompts.iter().map(|p| p.to_string()).collect();
         self
@@ -127,30 +134,34 @@ impl Telnet {
                                     // set window size
                                     if i == 0x1f {
                                         write
-                                            .write(&[
+                                            .write_all(&[
                                                 0xff, 0xfb, 0x1f, 0xff, 0xfa, 0x1f, 0x00, 0xfc,
                                                 0x00, 0x1b, 0xff, 0xf0,
                                             ])
                                             .await?;
                                     } else {
-                                        write.write(&[0xff, 0xfc, i]).await?;
+                                        write.write_all(&[0xff, 0xfc, i]).await?;
                                     }
                                 }
                                 Item::Will(i) | Item::Wont(i) => {
-                                    write.write(&[0xff, 0xfe, i]).await?;
+                                    write.write_all(&[0xff, 0xfe, i]).await?;
                                 }
                                 Item::Line(content) => {
                                     if content.ends_with(self.username_prompt.as_bytes()) {
                                         if auth_failed {
                                             return Err(TelnetError::AuthenticationFailed);
                                         }
-                                        write.write(user.as_bytes()).await?;
+                                        write.write_all(user.as_bytes()).await?;
                                     } else if content.ends_with(self.password_prompt.as_bytes()) {
-                                        write.write(pass.as_bytes()).await?;
+                                        write.write_all(pass.as_bytes()).await?;
                                         auth_failed = true;
-                                    } else if !self.prompts.iter()
-                                                .filter(|p| content.ends_with(p.as_bytes()))
-                                                .collect::<Vec<_>>().is_empty() {
+                                    } else if self
+                                        .prompts
+                                        .iter()
+                                        .filter(|p| content.ends_with(p.as_bytes()))
+                                        .count()
+                                        != 0
+                                    {
                                         return Ok(());
                                     }
                                 }
@@ -192,9 +203,13 @@ impl Telnet {
                     Some(item) => {
                         if let Item::Line(mut line) = item? {
                             // ignore prompt line
-                            if !self.prompts.iter()
-                                    .filter(|p| line.ends_with(p.as_bytes()))
-                                    .collect::<Vec<_>>().is_empty() {
+                            if self
+                                .prompts
+                                .iter()
+                                .filter(|p| line.ends_with(p.as_bytes()))
+                                .count()
+                                != 0
+                            {
                                 break;
                             }
                             // ignore command line echo
@@ -217,9 +232,13 @@ impl Telnet {
                                 continue;
                             }
                             // ignore command line
-                            if !self.prompts.iter()
-                                    .filter(|p| incomplete_line.ends_with(p.as_bytes()))
-                                    .collect::<Vec<_>>().is_empty() {
+                            if self
+                                .prompts
+                                .iter()
+                                .filter(|p| incomplete_line.ends_with(p.as_bytes()))
+                                .count()
+                                != 0
+                            {
                                 break;
                             }
                             if incomplete_line.ends_with(&[10]) {
@@ -266,9 +285,13 @@ impl Telnet {
                 Ok(res) => match res {
                     Some(item) => {
                         if let Item::Line(mut line) = item? {
-                            if !self.prompts.iter()
-                                    .filter(|p| line.ends_with(p.as_bytes()))
-                                    .collect::<Vec<_>>().is_empty() {
+                            if self
+                                .prompts
+                                .iter()
+                                .filter(|p| line.ends_with(p.as_bytes()))
+                                .count()
+                                != 0
+                            {
                                 break;
                             }
 
@@ -279,9 +302,13 @@ impl Telnet {
                                 continue;
                             }
                             // ignore command line
-                            if !self.prompts.iter()
-                                    .filter(|p| incomplete_line.ends_with(p.as_bytes()))
-                                    .collect::<Vec<_>>().is_empty() {
+                            if self
+                                .prompts
+                                .iter()
+                                .filter(|p| incomplete_line.ends_with(p.as_bytes()))
+                                .count()
+                                != 0
+                            {
                                 break;
                             }
                             if incomplete_line.ends_with(&[10]) {
