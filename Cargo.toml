@@ -1,6 +1,6 @@
 [package]
 name = "mini-telnet"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/kolapapa/mini-telnet"
@@ -16,7 +16,7 @@ bytes = "1.1.0"
 futures = "0.3.21"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["time", "net", "io-util"] }
-tokio-util = { version = "0.7.0", features = ["codec"] }
+tokio-util = { version = "0.7.1", features = ["codec"] }
 encoding = "0.2.33"
 
 [dev-dependencies]
