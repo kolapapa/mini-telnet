@@ -4,6 +4,7 @@ pub mod error;
 use encoding::DecoderTrap;
 use encoding::{all::GB18030, all::GBK, Encoding};
 use futures::stream::StreamExt;
+use regex::bytes::Regex;
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
@@ -58,6 +59,7 @@ impl TelnetBuilder {
 
     /// Establish a connection with the remote telnetd.
     pub async fn connect(self, addr: &str) -> Result<Telnet, TelnetError> {
+        let clear = Clear::new()?;
         match time::timeout(self.connect_timeout, TcpStream::connect(addr)).await {
             Ok(res) => Ok(Telnet {
                 content: vec![],
@@ -66,6 +68,7 @@ impl TelnetBuilder {
                 prompts: self.prompts,
                 username_prompt: self.username_prompt,
                 password_prompt: self.password_prompt,
+                clear,
             }),
             Err(_) => Err(TelnetError::Timeout(format!(
                 "Connect remote addr({})",
@@ -82,6 +85,7 @@ pub struct Telnet {
     prompts: Vec<String>,
     username_prompt: String,
     password_prompt: String,
+    clear: Clear,
 }
 
 impl Telnet {
@@ -146,19 +150,20 @@ impl Telnet {
                                 Item::Will(i) | Item::Wont(i) => {
                                     write.write_all(&[0xff, 0xfe, i]).await?;
                                 }
-                                Item::Line(content) => {
-                                    if content.ends_with(self.username_prompt.as_bytes()) {
+                                Item::Line(line) => {
+                                    let line = self.clear.color(&line);
+                                    if line.ends_with(self.username_prompt.as_bytes()) {
                                         if auth_failed {
                                             return Err(TelnetError::AuthenticationFailed);
                                         }
                                         write.write_all(user.as_bytes()).await?;
-                                    } else if content.ends_with(self.password_prompt.as_bytes()) {
+                                    } else if line.ends_with(self.password_prompt.as_bytes()) {
                                         write.write_all(pass.as_bytes()).await?;
                                         auth_failed = true;
                                     } else if self
                                         .prompts
                                         .iter()
-                                        .filter(|p| content.ends_with(p.as_bytes()))
+                                        .filter(|p| line.ends_with(p.as_bytes()))
                                         .count()
                                         != 0
                                     {
@@ -201,7 +206,9 @@ impl Telnet {
             match time::timeout(self.timeout, telnet.next()).await {
                 Ok(res) => match res {
                     Some(item) => {
-                        if let Item::Line(mut line) = item? {
+                        if let Item::Line(line) = item? {
+                            let mut line = self.clear.color(&line);
+
                             // ignore prompt line
                             if self
                                 .prompts
@@ -252,7 +259,7 @@ impl Telnet {
                 Err(_) => return Err(TelnetError::Timeout("read next framed".to_string())),
             }
         }
-        let result = self.content.join("\n");
+        let result = self.content.join("");
         self.content.clear();
         Ok(result)
     }
@@ -284,7 +291,8 @@ impl Telnet {
             match time::timeout(self.timeout, telnet.next()).await {
                 Ok(res) => match res {
                     Some(item) => {
-                        if let Item::Line(mut line) = item? {
+                        if let Item::Line(line) = item? {
+                            let mut line = self.clear.color(&line);
                             if self
                                 .prompts
                                 .iter()
@@ -322,7 +330,7 @@ impl Telnet {
                 Err(_) => return Err(TelnetError::Timeout("read next framed".to_string())),
             }
         }
-        let result = self.content.join("\n");
+        let result = self.content.join("");
         self.content.clear();
         Ok(result)
     }
@@ -341,5 +349,22 @@ fn decode(line: &[u8]) -> Result<String, TelnetError> {
             }
             Err(TelnetError::ParseError(e))
         }
+    }
+}
+
+struct Clear {
+    color_re: Regex,
+}
+
+impl Clear {
+    pub fn new() -> Result<Self, TelnetError> {
+        let color_re = Regex::new(r"\[\d{2,3}m")?;
+        Ok(Self { color_re })
+    }
+
+    pub fn color(&self, content: &[u8]) -> Vec<u8> {
+        let empty: &[u8] = &[];
+        let tmp = self.color_re.replace_all(content, empty);
+        tmp.into_owned()
     }
 }

@@ -16,4 +16,6 @@ pub enum TelnetError {
     AuthenticationFailed,
     #[error("No more data.")]
     NoMoreData,
+    #[error("Init Color regex failed `{0}`.")]
+    RegexError(#[from] regex::Error),
 }
