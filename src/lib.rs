@@ -363,8 +363,8 @@ impl Clear {
     }
 
     pub fn color(&self, content: &[u8]) -> Vec<u8> {
-        let empty: &[u8] = &[];
-        let tmp = self.color_re.replace_all(content, empty);
-        tmp.into_owned()
+        self.color_re
+            .replace_all(content, &[] as &[u8])
+            .into_owned()
     }
 }
